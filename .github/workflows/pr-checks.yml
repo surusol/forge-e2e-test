@@ -11,6 +11,11 @@ on:
 permissions:
   contents: read
 
+# NOTE: the PR AUTHOR, not github.actor. github.actor is whoever triggered the
+# CURRENT event, so the moment a human reopens, re-runs or pushes to a Dependabot
+# PR the exemption evaporates and the PR becomes unmergeable again. Verified: a
+# manual reopen turned all six red. The author field is stable for the PR's life.
+#
 # Dependabot cannot satisfy these gates: it has no Jira card, no requirement, and
 # writes its own body. Without an exemption every governed repo accumulates
 # permanently-unmergeable dependency PRs — including the SECURITY ones, which is
@@ -21,7 +26,7 @@ permissions:
 jobs:
   jira-key:
     name: Require a Jira issue key (FTEST-nnn)
-    if: github.actor != 'dependabot[bot]'
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Check the PR title and branch carry this card's key
@@ -73,7 +78,7 @@ jobs:
 
   stray-keys:
     name: Reference only this card's key
-    if: github.actor != 'dependabot[bot]'
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Check the PR title and body mention no other FTEST card
@@ -110,7 +115,7 @@ jobs:
 
   requirement-ref:
     name: Require a requirement reference (R1..Rn) in the PR body
-    if: github.actor != 'dependabot[bot]'
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Check PR body for a requirement reference
@@ -126,7 +131,7 @@ jobs:
 
   decision-ref:
     name: Require a decision record reference (ADR-nnnn or N/A)
-    if: github.actor != 'dependabot[bot]'
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Check PR body for an ADR reference
@@ -150,7 +155,7 @@ jobs:
 
   checklist:
     name: Require the PR checklist to be completed
-    if: github.actor != 'dependabot[bot]'
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Check every box in the PR body is ticked
@@ -175,7 +180,7 @@ jobs:
 
   narrative:
     name: Require a reviewable narrative
-    if: github.actor != 'dependabot[bot]'
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Check the PR explains itself in plain language
