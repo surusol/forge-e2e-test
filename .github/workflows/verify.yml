@@ -22,6 +22,13 @@ concurrency:
 jobs:
   verify:
     name: Verify (tests, docs, decisions)
+    # ubuntu-latest is replaced at scaffold time; `ubuntu-latest` by default. A project with a
+    # self-hosted runner sets it to its label instead: this is the heaviest job
+    # here (full checkout plus the whole gate) and self-hosted minutes are free,
+    # where GitHub-hosted ones are billed per job on a private repo.
+    #
+    # Only ever point this at a runner attached to a PRIVATE repo. On a public
+    # repo a self-hosted runner means any stranger's PR runs code on that host.
     runs-on: ubuntu-latest
     # Dependabot branches are dependabot/<ecosystem>/<dep>, which cannot match the
     # <type>/KEY-n-slug rule, and it has no card to name. Without this every
