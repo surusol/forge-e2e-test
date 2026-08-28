@@ -1,0 +1,209 @@
+name: PR checks
+
+# Guardrails that run on every pull request. Fast, no code dependencies, runs on
+# GitHub-hosted runners so it works even if a self-hosted runner is offline.
+# Replace FTEST with the Jira project key (e.g. WID) when scaffolding.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  jira-key:
+    name: Require a Jira issue key (FTEST-nnn)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the PR title and branch carry this card's key
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          # This check exists to match the Jira Automation rules EXACTLY.
+          # Those rules transition a card only when the PR title STARTS WITH
+          # "FTEST-<n>:" — see templates/automation-rules.json,
+          # operator STARTS_WITH on {{ '{{pullRequest.title}}' }}.
+          #
+          # A title that merely CONTAINS the key passes a looser check but
+          # matches no rule, so the card silently never moves. A board that
+          # stops tracking reality without saying so is worse than one that
+          # fails loudly, which is why this is strict about position.
+          echo "PR title : $PR_TITLE"
+          echo "Branch   : $HEAD_REF"
+          fail=0
+
+          if echo "$PR_TITLE" | grep -qE '^FTEST-[0-9]+: .'; then
+            TITLE_KEY=$(echo "$PR_TITLE" | grep -oE '^FTEST-[0-9]+')
+            echo "OK — title starts with $TITLE_KEY:"
+          else
+            TITLE_KEY=""
+            echo "::error title=PR title must start with the key::The title must begin with 'FTEST-<n>: ' followed by a summary — e.g. 'FTEST-12: saved-search storage'. The Jira rules match on the title STARTING WITH the key, so a title in any other shape leaves the card stuck where it is, with nothing reporting it (CONTRIBUTING.md §4)."
+            fail=1
+          fi
+
+          # The branch carries the key too: that is what links the PR to the
+          # card in the first place, and what pre-pr-check.sh compares against.
+          if echo "$HEAD_REF" | grep -qE 'FTEST-[0-9]+'; then
+            BRANCH_KEY=$(echo "$HEAD_REF" | grep -oE 'FTEST-[0-9]+' | head -1)
+            echo "OK — branch carries $BRANCH_KEY"
+          else
+            BRANCH_KEY=""
+            echo "::error title=Branch missing the key::The branch must be named <type>/FTEST-<n>-<slug> (CONTRIBUTING.md §4)."
+            fail=1
+          fi
+
+          # Disagreement means one of them is wrong, and the automation will
+          # follow the title while a reviewer follows the branch.
+          if [ -n "$TITLE_KEY" ] && [ -n "$BRANCH_KEY" ] && [ "$TITLE_KEY" != "$BRANCH_KEY" ]; then
+            echo "::error title=Title and branch name different cards::Title says $TITLE_KEY, branch says $BRANCH_KEY. The automation follows the title; a reviewer reads the branch. Make them agree."
+            fail=1
+          fi
+
+          exit $fail
+
+  stray-keys:
+    name: Reference only this card's key
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the PR title and body mention no other FTEST card
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          # A PR is linked to EVERY issue key it mentions — in the branch, the
+          # title, the body, or any commit message — and the merge automation
+          # transitions all of them. Mentioning another card here closes work
+          # nobody did. pre-pr-check.sh covers the commits; this covers the two
+          # surfaces it cannot see from inside a clone.
+          #
+          # It also matters for squash merges: GitHub composes the squash commit
+          # message from the PR title and body, so a stray key here becomes
+          # permanent history.
+          MY_KEY=$(echo "$HEAD_REF" | grep -oE 'FTEST-[0-9]+' | head -1)
+          [ -z "$MY_KEY" ] && MY_KEY=$(echo "$PR_TITLE" | grep -oE 'FTEST-[0-9]+' | head -1)
+          if [ -z "$MY_KEY" ]; then
+            echo "No key found — the jira-key check reports this."; exit 0
+          fi
+          echo "This card: $MY_KEY"
+
+          ALL=$(printf '%s' "$PR_TITLE $PR_BODY" | grep -oE 'FTEST-[0-9]+' | sort -u || true)
+          STRAY=$(printf '%s' "$ALL" | grep -vFx "$MY_KEY" || true)
+
+          if [ -n "$STRAY" ]; then
+            echo "Other cards mentioned: $(echo "$STRAY" | tr '\n' ' ')"
+            echo "::error title=Another card would be closed::This PR mentions $(echo "$STRAY" | tr '\n' ' ')in its title or body. Every key a PR mentions is linked and transitioned on merge, so merging this would close work nobody did. To refer to other work, describe it in words ('the CI-pipeline card'). To record a real dependency, add an issue link on the Jira card itself (Blocks / Relates to) — that is what the link field is for, and unlike prose it does not transition anything."
+            exit 1
+          fi
+          echo "OK — references only $MY_KEY."
+
+  requirement-ref:
+    name: Require a requirement reference (R1..Rn) in the PR body
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR body for a requirement reference
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if echo "$PR_BODY" | grep -qE '\bR[0-9]+\b'; then
+            echo "OK — found a requirement reference."
+          else
+            echo "::error title=Missing requirement reference::The PR body must name the requirement it serves (e.g. R3), per CONTRIBUTING.md §5."
+            exit 1
+          fi
+
+  decision-ref:
+    name: Require a decision record reference (ADR-nnnn or N/A)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR body for an ADR reference
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # The point is not that every PR has an ADR — most legitimately do
+          # not. The point is that the author had to answer the question
+          # consciously, in writing, before the change could land.
+          if echo "$PR_BODY" | grep -qiE 'ADR-[0-9]{4}'; then
+            echo "OK — references $(echo "$PR_BODY" | grep -oiE 'ADR-[0-9]{4}' | sort -u | tr '\n' ' ')"
+          elif echo "$PR_BODY" | grep -qiE '^\s*ADR:.*\bN/?A\b'; then
+            echo "OK — explicitly declared N/A."
+            if ! echo "$PR_BODY" | grep -qiE '^\s*ADR:.*N/?A\b.{10,}'; then
+              echo "::warning title=Bare N/A::'ADR: N/A' should say why in a few words (e.g. 'N/A — implements ADR-0004, no new constraint')."
+            fi
+          else
+            echo "::error title=Missing decision record::The PR body must name the ADR it implements (ADR-0007) or state 'ADR: N/A — <reason>'. Decision-shaped changes (dependencies, schemas, boundaries, auth, hosting) need an ADR — see docs/adr/0000-record-architecture-decisions.md."
+            exit 1
+          fi
+
+  checklist:
+    name: Require the PR checklist to be completed
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check every box in the PR body is ticked
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # An unticked box is an unanswered question, not a formality.
+          UNTICKED=$(echo "$PR_BODY" | grep -cE '^\s*- \[ \]' || true)
+          TICKED=$(echo "$PR_BODY" | grep -ciE '^\s*- \[x\]' || true)
+          echo "checklist: $TICKED ticked, $UNTICKED unticked"
+          if [ "$UNTICKED" -gt 0 ]; then
+            echo "Unticked items:"
+            echo "$PR_BODY" | grep -E '^\s*- \[ \]' | sed 's/^/  /'
+            echo "::error title=Incomplete checklist::$UNTICKED checklist item(s) are unticked. Tick each one only if it is actually true — if an item does not apply, strike it through and say why (~~item~~ n/a: reason)."
+            exit 1
+          fi
+          if [ "$TICKED" -eq 0 ]; then
+            echo "::error title=Checklist missing::The PR body has no checklist. Use the PR template (.github/pull_request_template.md)."
+            exit 1
+          fi
+          echo "OK — checklist complete."
+
+  narrative:
+    name: Require a reviewable narrative
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the PR explains itself in plain language
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # The reviewer's cheapest useful rung. When most code is written by an
+          # LLM, a human cannot read every diff — so the PR must carry a plain-
+          # language account of what changed and the NAMED tests that prove it.
+          # An unreadable PR is an unreviewable one, and unreviewed AI output is
+          # the failure mode this whole pipeline exists to prevent.
+          fail=0
+
+          section() {  # section <heading-regex>  -> prints that section's body
+            printf '%s\n' "$PR_BODY" \
+              | awk -v pat="$1" '
+                  /^##[[:space:]]/ { inside = ($0 ~ pat) ? 1 : 0; next }
+                  inside { print }'
+          }
+
+          WHAT=$(section '[Ww]hat *& *why')
+          # Strip HTML comments and blank lines before measuring.
+          WHAT_TEXT=$(printf '%s\n' "$WHAT" | sed 's/<!--.*-->//' | grep -vE '^\s*(<!--|-->)?\s*$' || true)
+          WORDS=$(printf '%s' "$WHAT_TEXT" | wc -w)
+          echo "narrative: $WORDS words under 'What & why'"
+          if [ "$WORDS" -lt 20 ]; then
+            echo "::error title=Narrative too thin::The 'What & why' section has $WORDS words. Explain in plain language what changed and why, so a reviewer can judge it without reading the whole diff. Aim for 20+ words."
+            fail=1
+          fi
+
+          TESTED=$(section '[Hh]ow it was tested')
+          TESTED_TEXT=$(printf '%s\n' "$TESTED" | sed 's/<!--.*-->//' | grep -vE '^\s*(<!--|-->)?\s*$' || true)
+          if [ -z "$TESTED_TEXT" ]; then
+            echo "::error title=No test evidence::The 'How it was tested' section is empty. Name the tests that prove this change."
+            fail=1
+          # A named test looks like an identifier or a path, not a sentence.
+          elif ! printf '%s' "$TESTED_TEXT" | grep -qE '[A-Za-z0-9_]+[._/-][A-Za-z0-9_/.-]+|\b(test|spec|scenario|Scenario)[_A-Za-z0-9]*\b'; then
+            echo "::error title=Tests not named::'How it was tested' must name the tests (e.g. test_reorder_threshold, features/limits.feature:12). 'Ran it locally' is not test evidence — it is not repeatable and nobody else can check it."
+            fail=1
+          else
+            echo "OK — test evidence names identifiable tests."
+          fi
+
+          exit $fail

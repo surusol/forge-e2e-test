@@ -1,0 +1,48 @@
+# An override record: a reviewed decision to let one gate firing through.
+#
+# Copy to .forge/overrides/<gate>-<short-slug>.yml and commit it. Being a
+# committed file is the point — lifting a blocker gets an author, a date and a
+# diff, exactly like lowering a gate would, so neither can happen quietly.
+#
+# This is NOT a way to skip a check you disagree with. If a gate is wrong, fix
+# the gate in its own PR. An override says "the gate is right in general and
+# wrong about this specific case, and here is why."
+#
+# Some rules cannot be overridden at all — secrets, editing the contract
+# alongside its implementation, editing an already-run migration, ADR
+# numbering, stray card keys, branch naming. Those change only by the owner
+# changing the rule.
+
+gate: DOC_GATE              # the config variable this lifts
+
+scope: issue                # issue | standing
+                            #   issue    — applies only on this card's branch
+                            #   standing — applies anywhere until it expires.
+                            #              Use sparingly; prefer issue.
+issue: WID-12               # required when scope: issue
+
+# What is being claimed. Write it so someone else could check it. "This is
+# fine" is not a claim; "this PR touches only generated output" is.
+claim: "This PR changes only generated protobuf output; there is no behaviour to document."
+
+# How you know. Cite something real — a file, a command, a number, a link.
+# The whole point of adjudicating rather than blocking is that the decision
+# rests on evidence, so an empty or hand-waving evidence field defeats it.
+evidence: |
+  Every changed path is under api/proto/gen/, which is emitted by `buf generate`
+  and listed in .gitattributes as linguist-generated. No hand-written file is
+  touched. Confirmed with: git diff --name-only main..HEAD
+
+# OPTIONAL, and the strongest field here. A command that re-checks the claim.
+# If present, the gate RUNS it on every check, and the override is VOID unless
+# it exits 0. That turns "trust me" into something that keeps proving itself,
+# and makes a stale override fail loudly instead of quietly persisting.
+verify: "! git diff --name-only origin/main..HEAD | grep -qv '^api/proto/gen/'"
+
+decided_by: andrew@surusol.com
+decided_at: 2026-08-28
+
+# REQUIRED. An override with no end date is a permanent hole in the gate, which
+# is a rule change wearing a disguise — the gate ignores any record without one.
+# Keep it short. Renewing is cheap; forgetting is not.
+expires: 2026-09-28

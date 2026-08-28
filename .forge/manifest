@@ -1,0 +1,17 @@
+# Provenance of the files forge-project distributed into this repo.
+# Written at scaffold time; checked by forge-audit and scripts/forge-verify.sh.
+#
+# A hash that no longer matches means the local copy was EDITED. That is not
+# automatically wrong — a repo may hold a deliberate variant — but it should be
+# a decision someone made, not a surprise. Record deliberate variants with
+# FORGE_SYNC=off in .forge/config so sync-workflows.py stops trying to revert them.
+forge_version: 6c9f25f6ffc7
+scaffolded_at: 2026-08-28
+files:
+  scripts/pre-pr-check.sh: 531dd3fc55fcc43c
+  scripts/forge-metrics.sh: 2de1c5551137b465
+  scripts/.forge-otlp.py: 69000ff9022a8c9f
+  scripts/jira-brief.sh: 0f176cfac6d10223
+  .github/workflows/pr-checks.yml: f16b00c22bd870f3
+  .github/workflows/verify.yml: 0ba9108c864772ed
+  .github/workflows/jira-transition.yml: 0dc38fe9b627b9d1

@@ -1,0 +1,136 @@
+# Move the Jira card from GitHub, instead of from Jira Automation.
+#
+# WHY THIS EXISTS. Jira Automation is the default path (reference/jira-automation.md), but on
+# the Free plan EVERY successful rule run counts against a shared 100-runs-per-month cap for
+# the whole site -- there is no single-project exemption. A single PR burns 2-3 runs (opened,
+# merged, plus any subtask cascade), so roughly 33 PRs across all projects exhausts it and then
+# EVERY rule on the site stops until the 1st of the next month. It fails silently: the rules
+# stay ENABLED, Jira still receives the PR events, and the cards simply never move.
+#
+# The second reason is diagnosability. The automation REST API exposes no audit-log endpoint,
+# so when a rule does not fire you cannot tell from outside whether it never triggered, failed a
+# condition, or was throttled -- someone has to open the UI and read it. This workflow writes an
+# ordinary Actions log you can read with `gh run view`.
+#
+# TRADE-OFF, STATED HONESTLY: this puts a Jira credential in GitHub Secrets. Use a DEDICATED BOT
+# account scoped to the projects it must touch -- never a personal full-access token, which would
+# make a GitHub compromise an everything-in-Atlassian compromise.
+#
+# Setup:
+#   gh secret set JIRA_BASE_URL  --body "https://your.atlassian.net"
+#   gh secret set JIRA_EMAIL     --body "bot@yourdomain.com"
+#   gh secret set JIRA_API_TOKEN --body "<token from id.atlassian.com/manage-profile/security/api-tokens>"
+
+name: Jira transition
+
+on:
+  pull_request:
+    types: [opened, reopened, closed]
+
+permissions:
+  contents: read
+
+jobs:
+  transition:
+    runs-on: ubuntu-latest
+    # Skip cleanly on forks: secrets are not available there, and a red X on an
+    # outside contributor's PR for a bookkeeping step is noise, not signal.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Move the card
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          PR_ACTION: ${{ github.event.action }}
+          PROJECT_KEY: "FTEST"
+        run: |
+          python3 - <<'PY'
+          import base64, json, os, re, sys, urllib.request, urllib.error
+
+          site = (os.environ.get("JIRA_BASE_URL") or "").rstrip("/")
+          email, token = os.environ.get("JIRA_EMAIL"), os.environ.get("JIRA_API_TOKEN")
+          if not (site and email and token):
+              print("::warning::Jira secrets not configured; skipping (not a failure)")
+              sys.exit(0)
+
+          # ALWAYS go through api.atlassian.com, never the site URL. A SCOPED API token is
+          # rejected on the site URL with a bare 401; a classic token works on both. The
+          # gateway is therefore the only choice that supports either kind. The cloud id
+          # resolves from the site URL unauthenticated.
+          if "api.atlassian.com" in site:
+              base = site
+          else:
+              with urllib.request.urlopen(site + "/_edge/tenant_info", timeout=30) as r:
+                  cloud_id = json.load(r)["cloudId"]
+              base = f"https://api.atlassian.com/ex/jira/{cloud_id}"
+
+          key_re = re.compile(rf"{os.environ['PROJECT_KEY']}-\d+")
+          # Title first: it is what a human curates and what CI already enforces. The branch is
+          # the fallback, because a stacked PR's BASE branch can carry a different card's key
+          # and picking that one moves the wrong card.
+          m = key_re.search(os.environ.get("PR_TITLE") or "") or \
+              key_re.search(os.environ.get("PR_BRANCH") or "")
+          if not m:
+              print("::warning::no issue key in PR title or branch; nothing to move")
+              sys.exit(0)
+          key = m.group(0)
+
+          action, merged = os.environ["PR_ACTION"], os.environ["PR_MERGED"] == "true"
+          want = {"opened": "In Review", "reopened": "In Review"}.get(action)
+          if action == "closed":
+              want = "Done" if merged else "In Progress"
+          if not want:
+              print(f"::notice::no transition mapped for action={action}")
+              sys.exit(0)
+
+          auth = base64.b64encode(f"{email}:{token}".encode()).decode()
+          H = {"Authorization": f"Basic {auth}", "Content-Type": "application/json",
+               "Accept": "application/json"}
+
+          def call(method, path, body=None):
+              req = urllib.request.Request(base + path, method=method, headers=H,
+                                           data=json.dumps(body).encode() if body else None)
+              with urllib.request.urlopen(req, timeout=45) as r:
+                  return json.load(r) if r.status not in (204,) else None
+
+          try:
+              cur = call("GET", f"/rest/api/3/issue/{key}?fields=status,labels")
+              status = cur["fields"]["status"]["name"]
+
+              # A STANDING card tracks work that recurs forever -- governance tooling
+              # upkeep, dependency bumps, a recurring sync. Closing it on merge makes
+              # "Done" mean "until next month", which is a small lie that erodes trust
+              # in the whole board. Such a card carries the `recurring` label and is
+              # moved INTO progress but never OUT of it by automation; a human closes
+              # it if the work genuinely ends.
+              labels = [l.lower() for l in cur["fields"].get("labels") or []]
+              if "recurring" in labels and want.lower() in ("done",):
+                  print(f"{key} is labelled `recurring`; leaving it at {status!r} "
+                        f"rather than closing a standing card")
+                  sys.exit(0)
+
+              if status == want:
+                  print(f"{key} already {want}; nothing to do")
+                  sys.exit(0)
+              # Resolve by NAME: transition ids differ per project, so a hardcoded id silently
+              # moves the card to the wrong status on the next project that reuses this file.
+              avail = call("GET", f"/rest/api/3/issue/{key}/transitions")["transitions"]
+              match = next((t for t in avail if t["to"]["name"].lower() == want.lower()), None)
+              if not match:
+                  print(f"::warning::{key}: no transition to {want!r} "
+                        f"(available: {[t['to']['name'] for t in avail]})")
+                  sys.exit(0)
+              call("POST", f"/rest/api/3/issue/{key}/transitions", {"transition": {"id": match["id"]}})
+              call("POST", f"/rest/api/3/issue/{key}/comment", {"body": {"type": "doc", "version": 1,
+                   "content": [{"type": "paragraph", "content": [{"type": "text",
+                   "text": f"{status} -> {want} via {os.environ['PR_URL']}"}]}]}})
+              print(f"{key}: {status} -> {want}")
+          except urllib.error.HTTPError as e:
+              # Bookkeeping must never fail a merge. Warn loudly; do not exit non-zero.
+              print(f"::warning::{key}: Jira returned {e.code} {e.read().decode()[:300]}")
+          PY

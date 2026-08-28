@@ -1,0 +1,43 @@
+# Read by scripts/pre-pr-check.sh, scripts/jira-brief.sh and CI.
+PROJECT_KEY=FTEST
+JIRA_BASE_URL=
+REPO=surusol/forge-e2e-test
+DEFAULT_BRANCH=main
+
+# Maturity level. Sets every gate default; raise it as the project earns it.
+# L0 scaffold  L1 building  L2 established  L3 load-bearing
+# Lowering this is a REVIEWED CHANGE — its own PR, with a written reason.
+FORGE_LEVEL=L1
+
+# The test suite. Set this — an empty TEST_CMD means this repo has no
+# automated proof that it works, and the gate says so on every run.
+TEST_CMD=""
+LINT_CMD=""
+BUILD_CMD=""
+
+# The card and requirement that governance-tooling upkeep is tracked under in
+# THIS project. sync-workflows.py cites them so its PRs satisfy the same gates
+# they distribute; without them it skips this repo rather than opening a PR it
+# knows will fail CI. Set them once, to whichever card you want that work on.
+# provision_jira.py creates the upkeep card and prints these two lines; paste
+# them here once the board exists. Documented in CONTRIBUTING.md §14.
+# SYNC_ISSUE=FTEST-1
+# SYNC_REQUIREMENT=R1
+
+# Directories whose change implies a behaviour change (for the docs gate).
+SOURCE_PATHS="src cmd internal pkg lib app"
+
+# Per-gate overrides. Leave unset to inherit from FORGE_LEVEL above.
+# Each takes: off | warn | block. TEST_CMD failure always blocks.
+#   CONTRACT_GATE  DOC_GATE  ADR_GATE  GHERKIN_GATE  API_GATE
+#   MIGRATION_GATE  MUTATION_GATE  REQ_TEST_GATE
+#
+# CONTRACT_GATE guards the control that matters most for AI-written work: the
+# contract (REQUIREMENTS.md, features/*.feature) may not move in the same PR as
+# the implementation it judges. EDITING an existing one always fails, at every
+# level; this setting governs only the milder "added in the wrong order".
+
+# Proves the tests would notice if the code were wrong — the only mechanical
+# check that an LLM-written test asserts rather than merely executes.
+MUTATION_CMD=""
+MUTATION_WHEN=ci
