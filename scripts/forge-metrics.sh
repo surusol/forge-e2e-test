@@ -91,7 +91,10 @@ TOP_GATE=""; TOP_GATE_N=0
 if [[ -n "$OV_BY_GATE" ]]; then
   read -r TOP_GATE_N TOP_GATE < <(sort <<<"$OV_BY_GATE" | grep -v '^$' | uniq -c | sort -rn | head -1)
 fi
-OV_ADDED="$(git log --since="$AFTER" --diff-filter=A --format='' --name-only -- .forge/overrides/ 2>/dev/null | grep -cE '\.ya?ml$' | head -1)"; OV_ADDED="${OV_ADDED:-0}"
+# Exclude the shipped TEMPLATE, as the per-file loop above already does. Counting
+# it made every freshly scaffolded repo report "1 override added, 0 live".
+OV_ADDED="$(git log --since="$AFTER" --diff-filter=A --format='' --name-only -- .forge/overrides/ 2>/dev/null \
+            | grep -E '\.ya?ml$' | grep -vc '/TEMPLATE\.' | head -1)"; OV_ADDED="${OV_ADDED:-0}"
 
 # ── traceability ────────────────────────────────────────────────────────────
 REQ_TOTAL=0; REQ_COVERED=0

@@ -23,6 +23,13 @@ jobs:
   verify:
     name: Verify (tests, docs, decisions)
     runs-on: ubuntu-latest
+    # Dependabot branches are dependabot/<ecosystem>/<dep>, which cannot match the
+    # <type>/KEY-n-slug rule, and it has no card to name. Without this every
+    # dependency PR — security ones included — is permanently unmergeable, which
+    # defeats the point of shipping Dependabot at all. The stack's own ci.yml
+    # still runs its tests against these PRs; what is waived here is the card
+    # bookkeeping, not the verification.
+    if: github.actor != 'dependabot[bot]'
     steps:
       # Full history: the script diffs against the merge-base with the base branch.
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2

@@ -102,7 +102,11 @@ cat <<EOF
 - Read CONTRIBUTING.md in the repo before starting; it is the authority.
 - Branch name MUST contain the key: \`feat/${KEY}-${SLUG:-task}\`
   (types: feat | fix | sec | docs | chore). Required by CI.
-- PR title MUST contain \`${KEY}\`; PR body MUST name the requirement (${RLABELS:-R#}).
+- PR title MUST **start with** \`${KEY}: \` — the key, a colon, a space, then a
+  summary. Not merely contain it: the Jira rules match on the title STARTING
+  WITH the key, so any other shape leaves the card silently unmoved, and CI
+  rejects it. Example: \`${KEY}: short summary of the change\`
+- PR body MUST name the requirement (${RLABELS:-R#}).
 - Do NOT weaken any security wall in CONTRIBUTING.md §6.
 - Data/schema changes only via numbered migration files (if applicable).
 - Open a pull request — do NOT merge. The owner reviews and merges.
