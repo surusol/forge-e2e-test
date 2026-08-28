@@ -25,7 +25,11 @@ name: Jira transition
 
 on:
   pull_request:
-    types: [opened, reopened, closed]
+    # ready_for_review matters: a draft PR fires `opened`, and moving a card to
+    # In Review then misreports the board — a draft is by definition not ready to
+    # be reviewed. Drafts are skipped below, and the move happens on the event
+    # that is actually true.
+    types: [opened, reopened, closed, ready_for_review]
 
 permissions:
   contents: read
@@ -46,6 +50,7 @@ jobs:
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           PR_MERGED: ${{ github.event.pull_request.merged }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
           PR_ACTION: ${{ github.event.action }}
           PROJECT_KEY: "FTEST"
         run: |
@@ -81,7 +86,15 @@ jobs:
           key = m.group(0)
 
           action, merged = os.environ["PR_ACTION"], os.environ["PR_MERGED"] == "true"
-          want = {"opened": "In Review", "reopened": "In Review"}.get(action)
+          # A draft says "not ready to review". Moving its card to In Review makes the
+          # board claim something the author explicitly denied, and the reviewer who
+          # trusts the board picks up work that is not there yet. Closing a draft still
+          # transitions: abandoning or merging one is a real outcome.
+          if os.environ.get("PR_DRAFT") == "true" and action in ("opened", "reopened"):
+              print(f"::notice::PR is a draft; leaving the card alone until it is marked ready")
+              sys.exit(0)
+          want = {"opened": "In Review", "reopened": "In Review",
+                  "ready_for_review": "In Review"}.get(action)
           if action == "closed":
               want = "Done" if merged else "In Progress"
           if not want:
@@ -130,7 +143,13 @@ jobs:
                    "content": [{"type": "paragraph", "content": [{"type": "text",
                    "text": f"{status} -> {want} via {os.environ['PR_URL']}"}]}]}})
               print(f"{key}: {status} -> {want}")
+          # Bookkeeping must never fail a merge. HTTPError alone is not enough for that
+          # promise: a network blip (URLError), a truncated body (JSONDecodeError) or an
+          # unexpected shape (KeyError) would crash the step and turn a green merge red
+          # over a card that did not move. Warn loudly on anything; never exit non-zero.
           except urllib.error.HTTPError as e:
-              # Bookkeeping must never fail a merge. Warn loudly; do not exit non-zero.
               print(f"::warning::{key}: Jira returned {e.code} {e.read().decode()[:300]}")
+          except Exception as e:
+              print(f"::warning::{key}: could not move the card ({type(e).__name__}: {e}); "
+                    f"the merge is unaffected. Check the card by hand.")
           PY

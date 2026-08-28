@@ -250,8 +250,22 @@ fi
 
 # ── 1. branch naming ─────────────────────────────────────────────────────────
 section "Traceability"
-BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-if [[ -z "$PROJECT_KEY" ]]; then
+# actions/checkout leaves a detached HEAD on a pull_request event, so
+# `rev-parse --abbrev-ref HEAD` returns the literal string "HEAD". Taking that as
+# the branch name made the naming check fail on EVERY pull request in CI, with
+# `Verify` a required check and no bypass actors — so no PR could ever merge in a
+# scaffolded repo, and the stray-key check silently went dead with it.
+# GITHUB_HEAD_REF carries the real source branch on a pull_request event.
+BRANCH="${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD)}"
+if [[ "$BRANCH" == "HEAD" ]]; then
+  # Detached with nothing to tell us the branch: refuse to judge rather than
+  # judge wrongly. Failing here would block every PR; passing silently would
+  # skip traceability. Warn and let the CI metadata jobs cover it.
+  BRANCH=""
+fi
+if [[ -z "$BRANCH" ]]; then
+  warn "cannot determine the branch name (detached HEAD, no GITHUB_HEAD_REF) — branch and stray-key checks skipped; the pr-checks CI jobs still cover both"
+elif [[ -z "$PROJECT_KEY" ]]; then
   skip "no PROJECT_KEY in .forge/config — branch-name check skipped"
 elif [[ "$BRANCH" == "${DEFAULT_BRANCH:-main}" ]]; then
   skip "on the default branch — branch-name check not applicable"
