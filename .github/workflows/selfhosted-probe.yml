@@ -1,0 +1,23 @@
+name: Self-hosted probe
+
+# Proves the ftest-local runner actually accepts and completes a job, rather
+# than merely appearing online. Delete with the runner.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  where-am-i:
+    name: Runs on the self-hosted runner
+    runs-on: [self-hosted, ftest-local]
+    steps:
+      - name: Report the host
+        run: |
+          echo "runner name : ${RUNNER_NAME}"
+          echo "hostname    : $(hostname)"
+          echo "os          : $(uname -srm)"
+          echo "workdir     : ${GITHUB_WORKSPACE}"
